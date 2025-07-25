@@ -1,4 +1,4 @@
-cat > flask_app.py << 'EOF'
+
 from flask import Flask, request, jsonify
 import logging
 from datetime import datetime
