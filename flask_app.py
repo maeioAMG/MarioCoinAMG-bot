@@ -244,3 +244,284 @@ def dashboard():
             'message': 'Dashboard temporarily unavailable',
             'redirect': '/login'
         }), 200
+@app.route('/login')
+def login():
+    """Login page"""
+    try:
+        return render_template('login.html')
+    except Exception as e:
+        logger.error(f"Error in login: {e}")
+        # Fallback simple login
+        return '''
+        <!DOCTYPE html>
+        <html>
+        <head><title>MarioCoinAMG Login</title></head>
+        <body style="font-family: Arial; text-align: center; padding: 50px; background: #228B22;">
+            <h1 style="color: white;">🐸 MarioCoinAMG</h1>
+            <p style="color: white;">Conectează-te prin Telegram pentru a accesa dashboard-ul.</p>
+            <a href="/quick_login" style="background: #32CD32; color: white; padding: 15px 30px; text-decoration: none; border-radius: 25px;">🔗 Login Rapid</a>
+        </body>
+        </html>
+        '''
+
+@app.route('/quick-login')
+@app.route('/quick_login')
+def quick_login():
+    """Quick login for testing"""
+    try:
+        # Create or get test user - using your real name
+        test_user = WebUser.query.filter_by(telegram_id=12345).first()
+        if not test_user:
+            test_user = WebUser(
+                telegram_id=12345,
+                username='utilizator_real',
+                first_name='Utilizator',
+                last_name='Real',
+                broscute_points=1000,
+                google_form_completed=True
+            )
+            db.session.add(test_user)
+            db.session.commit()
+        else:
+            # Update existing test user with real name
+            test_user.first_name = 'Utilizator'
+            test_user.last_name = 'Real'
+            test_user.username = 'utilizator_real'
+            db.session.commit()
+        
+        session['user_id'] = test_user.id
+        return redirect('/dashboard')
+    except Exception as e:
+        logger.error(f"Error in quick_login: {e}")
+        return "Login error - check logs", 500
+
+@app.route('/logout')
+def logout():
+    """Logout user"""
+    session.clear()
+    return redirect('/login')
+
+@app.route('/telegram_auth', methods=['POST'])
+def telegram_auth():
+    """Handle Telegram WebApp authentication"""
+    try:
+        data = request.get_json()
+        
+        telegram_id = data.get('telegram_id')
+        first_name = data.get('first_name', 'Utilizator')
+        last_name = data.get('last_name', '')
+        username = data.get('username', f'user_{telegram_id}')
+        
+        if not telegram_id:
+            return jsonify({'success': False, 'error': 'Telegram ID lipsește'}), 400
+        
+        # Caută utilizatorul existent sau creează unul nou
+        user = WebUser.query.filter_by(telegram_id=telegram_id).first()
+        
+        if not user:
+            user = WebUser(
+                telegram_id=telegram_id,
+                username=username,
+                first_name=first_name,
+                last_name=last_name,
+                broscute_points=100,  # Bonus de înregistrare
+                mario_tokens=0,
+                total_earned=100,
+                google_form_completed=True  # Acces complet
+            )
+            db.session.add(user)
+            db.session.commit()
+            
+            logger.info(f"Created new Telegram user: {first_name} {last_name} (ID: {telegram_id})")
+        else:
+            # Actualizează numele dacă s-a schimbat
+            user.first_name = first_name
+            user.last_name = last_name
+            user.username = username
+            db.session.commit()
+            
+            logger.info(f"Updated existing Telegram user: {first_name} {last_name} (ID: {telegram_id})")
+        
+        # Setează sesiunea
+        session['user_id'] = user.id
+        
+        return jsonify({
+            'success': True,
+            'message': f'Bun venit, {first_name}!',
+            'redirect': '/dashboard',
+            'user': {
+                'name': f"{first_name} {last_name}".strip(),
+                'broscute_points': user.broscute_points,
+                'mario_tokens': user.mario_tokens
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in Telegram auth: {e}")
+        return jsonify({'success': False, 'error': 'Eroare la autentificare'}), 500
+
+@app.route('/update_user_name', methods=['POST'])
+def update_user_name():
+    """Update user's real name from Telegram"""
+    try:
+        data = request.get_json()
+        
+        if 'user_id' not in session:
+            return jsonify({'success': False, 'error': 'Not authenticated'}), 401
+        
+        user = WebUser.query.get(session['user_id'])
+        if not user:
+            return jsonify({'success': False, 'error': 'User not found'}), 404
+        
+        # Update with real name
+        first_name = data.get('first_name', '').strip()
+        last_name = data.get('last_name', '').strip()
+        
+        if first_name:
+            user.first_name = first_name
+        if last_name:
+            user.last_name = last_name
+            
+        db.session.commit()
+        
+        logger.info(f"Updated user name: {first_name} {last_name} (ID: {user.telegram_id})")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Numele actualizat cu succes: {first_name} {last_name}',
+            'user': {
+                'first_name': user.first_name,
+                'last_name': user.last_name
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Error updating user name: {e}")
+        return jsonify({'success': False, 'error': 'Eroare la actualizare'}), 500
+
+@app.route('/update_name')
+def update_name_page():
+    """Page to update user's real name"""
+    if 'user_id' not in session:
+        return redirect('/login')
+    
+    user = WebUser.query.get(session['user_id'])
+    if not user:
+        return redirect('/logout')
+    
+    return render_template('update_name.html', user=user)
+
+@app.route('/token_conversion')
+def token_conversion():
+    """Token conversion information page"""
+    if 'user_id' not in session:
+        return redirect('/login')
+    
+    user = WebUser.query.get(session['user_id'])
+    if not user:
+        return redirect('/logout')
+    
+    return render_template('token_conversion.html', user=user)
+
+# DEZACTIVAT PENTRU SECURITATE - endpoint vulnerabil eliminat
+# @app.route('/test-user') - BLOCAT: genera utilizatori ficțivi neautorizați
+
+@app.route('/play/daily', methods=['POST'])
+def play_daily_game():
+    """Play daily game"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    user = WebUser.query.get(session['user_id'])
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+    
+    if not can_play_daily_game(user):
+        return jsonify({'error': 'Daily game on cooldown'}), 400
+    
+    # Game logic
+    reward = random.randint(10, 100)
+    
+    # Update user
+    user.broscute_points += reward
+    user.total_earned += reward
+    user.last_daily_game = datetime.utcnow()
+    
+    db.session.commit()
+    
+    logger.info(f"User {user.telegram_id} played daily game and won {reward} broșcuțe")
+    
+    return jsonify({
+        'success': True,
+        'reward': reward,
+        'new_balance': user.broscute_points,
+        'message': f'Felicitări! Ai câștigat {reward} broșcuțe!'
+    })
+
+@app.route('/play/luck', methods=['POST'])
+def play_luck_game():
+    """Play luck game"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    user = WebUser.query.get(session['user_id'])
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+    
+    if not can_play_luck_game(user):
+        return jsonify({'error': 'Luck game on cooldown'}), 400
+    
+    # Game logic
+    reward = random.randint(5, 50)
+    
+    # Update user
+    user.broscute_points += reward
+    user.total_earned += reward
+    user.last_luck_game = datetime.utcnow()
+    
+    db.session.commit()
+    
+    logger.info(f"User {user.telegram_id} played luck game and won {reward} broșcuțe")
+    
+    return jsonify({
+        'success': True,
+        'reward': reward,
+        'new_balance': user.broscute_points,
+        'message': f'Noroc! Ai câștigat {reward} broșcuțe!'
+    })
+
+@app.route('/mining')
+def mining_page():
+    """Mining application page"""
+    if 'user_id' not in session:
+        return redirect('/login')
+    
+    user = WebUser.query.get(session['user_id'])
+    if not user:
+        return redirect('/logout')
+    
+    return render_template('mining.html', user=user)
+
+@app.route('/games')
+def games_page():
+    """Games page"""
+    if 'user_id' not in session:
+        return redirect('/login')
+    
+    user = WebUser.query.get(session['user_id'])
+    if not user:
+        return redirect('/logout')
+    
+    return render_template('games.html', user=user)
+
+@app.route('/analytics')
+def analytics_page():
+    """Analytics dashboard page"""
+    if 'user_id' not in session:
+        return redirect('/login')
+    
+    user = WebUser.query.get(session['user_id'])
+    if not user:
+        return redirect('/logout')
+    
+    return render_template('analytics.html', user=user)
