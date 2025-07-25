@@ -525,3 +525,331 @@ def analytics_page():
         return redirect('/logout')
     
     return render_template('analytics.html', user=user)
+    # Calculate analytics data
+    try:
+        # Total users count
+        total_users = db.session.query(WebUser).count()
+        
+        # Total broșcuțe in circulation
+        total_broscute = db.session.query(db.func.sum(WebUser.broscute_points)).scalar() or 0
+        
+        # Total MARIO tokens distributed
+        total_mario = db.session.query(db.func.sum(WebUser.mario_tokens)).scalar() or 0
+        
+        # Active users (users with any points)
+        active_users = db.session.query(WebUser).filter(WebUser.broscute_points > 0).count()
+        
+        # Recent activity (last 7 days)
+        recent_activity = db.session.query(GameHistory).filter(
+            GameHistory.created_at >= datetime.utcnow() - timedelta(days=7)
+        ).count()
+        
+        # Top 10 users by broscute_points
+        top_users = db.session.query(WebUser).filter(WebUser.broscute_points > 0).order_by(WebUser.broscute_points.desc()).limit(10).all()
+        
+        analytics_data = {
+            'total_users': total_users,
+            'total_broscute': total_broscute,
+            'total_mario': total_mario,
+            'active_users': active_users,
+            'recent_activity': recent_activity,
+            'conversion_rate': round((active_users / total_users * 100) if total_users > 0 else 0, 1)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error calculating analytics: {e}")
+        analytics_data = {
+            'total_users': 0,
+            'total_broscute': 0,
+            'total_mario': 0,
+            'active_users': 0,
+            'recent_activity': 0,
+            'conversion_rate': 0
+        }
+        top_users = []
+    
+    return render_template('analytics.html', user=user, analytics=analytics_data, top_users=top_users)
+
+@app.route('/staking')
+def staking_page():
+    """Staking page"""
+    if 'user_id' not in session:
+        return redirect('/login')
+    
+    user = WebUser.query.get(session['user_id'])
+    if not user:
+        return redirect('/logout')
+    
+    # Calculate pending staking rewards
+    pending_rewards = calculate_staking_rewards(user) - user.staking_rewards
+    
+    return render_template('staking.html', user=user, pending_rewards=pending_rewards)
+
+@app.route('/history')
+def history_page():
+    """Transaction history page"""
+    if 'user_id' not in session:
+        return redirect('/login')
+    
+    user = WebUser.query.get(session['user_id'])
+    if not user:
+        return redirect('/logout')
+    
+    return render_template('history.html', user=user)
+
+@app.route('/leaderboard')
+def leaderboard_page():
+    """Leaderboard page"""
+    if 'user_id' not in session:
+        return redirect('/login')
+    
+    user = WebUser.query.get(session['user_id'])
+    if not user:
+        return redirect('/logout')
+    
+    # Get top users for leaderboard
+    try:
+        top_users = db.session.query(WebUser).filter(
+            WebUser.broscute_points > 0
+        ).order_by(WebUser.broscute_points.desc()).limit(20).all()
+        
+        logger.info(f"Leaderboard query returned {len(top_users)} users")
+        
+    except Exception as e:
+        logger.error(f"Error fetching leaderboard: {e}")
+        top_users = []
+    
+    return render_template('leaderboard.html', user=user, top_users=top_users)
+
+@app.route('/referral')
+def referral_page():
+    """Referral page"""
+    if 'user_id' not in session:
+        return redirect('/login')
+    
+    user = WebUser.query.get(session['user_id'])
+    if not user:
+        return redirect('/logout')
+    
+    return render_template('referral.html', user=user)
+
+@app.route('/memory-game')
+@app.route('/memory_game')
+def memory_game_page():
+    """Memory game page"""
+    if 'user_id' not in session:
+        return redirect('/login')
+    
+    user = WebUser.query.get(session['user_id'])
+    if not user:
+        return redirect('/logout')
+    
+    return render_template('memory_game.html', user=user)
+
+@app.route('/token-conversion')
+def token_conversion_page():
+    """Token conversion page"""
+    if 'user_id' not in session:
+        return redirect('/login')
+    
+    user = WebUser.query.get(session['user_id'])
+    if not user:
+        return redirect('/logout')
+    
+    return render_template('token_conversion.html', user=user)
+
+@app.route('/complete-form', methods=['POST'])
+def complete_google_form():
+    """Mark Google Form as completed"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    user = WebUser.query.get(session['user_id'])
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+    
+    if user.google_form_completed:
+        return jsonify({'error': 'Google Form already completed'}), 400
+    
+    # Mark form as completed
+    user.google_form_completed = True
+    user.google_form_date = datetime.utcnow()
+    
+    # Give bonus points for completing form
+    form_bonus = 500
+    user.broscute_points += form_bonus
+    user.total_earned += form_bonus
+    
+    db.session.commit()
+    
+    logger.info(f"User {user.telegram_id} completed Google Form and received {form_bonus} bonus")
+    
+    return jsonify({
+        'success': True,
+        'bonus': form_bonus,
+        'new_balance': user.broscute_points,
+        'message': f'Formularul a fost completat! Ai primit {form_bonus} broșcuțe bonus!'
+    })
+
+@app.route('/validate/distribution', methods=['POST'])
+def validate_distribution():
+    """Validate distribution completion"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    user = WebUser.query.get(session['user_id'])
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+    
+    if user.distribution_completed:
+        return jsonify({'error': 'Distribution already completed'}), 400
+    
+    # Distribution bonus
+    bonus = 300  # 300 broșcuțe bonus for distribution
+    
+    user.distribution_completed = True
+    user.distribution_date = datetime.utcnow()
+    user.broscute_points += bonus
+    user.total_earned += bonus
+    
+    db.session.commit()
+    
+    logger.info(f"User {user.telegram_id} completed distribution and received {bonus} broșcuțe")
+    
+    return jsonify({
+        'success': True,
+        'message': f'Excelent! Ai primit {bonus} broșcuțe pentru distribuire!',
+        'new_balance': user.broscute_points,
+        'bonus': bonus
+    })
+
+@app.route('/api/add_game_rewards', methods=['POST'])
+def add_game_rewards():
+    """API endpoint to add game rewards to user account"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    data = request.get_json()
+    game_type = data.get('game', 'unknown')
+    score = data.get('score', 0)
+    rewards = data.get('rewards', 0)
+    
+    user_id = session['user_id']
+    
+    try:
+        user = WebUser.query.get(user_id)
+        if user:
+            user.broscute_points += rewards
+            user.total_earned += rewards
+            
+            # Add game history record
+            game_history = GameHistory(
+                user_id=user_id,
+                game_type=game_type,
+                broscute_earned=rewards
+            )
+            
+            db.session.add(game_history)
+            db.session.commit()
+            
+            logger.info(f"User {user.telegram_id} earned {rewards} broșcuțe from {game_type} game")
+            
+            return jsonify({
+                'success': True,
+                'new_balance': user.broscute_points,
+                'rewards_added': rewards
+            })
+    except Exception as e:
+        logger.error(f"Error adding game rewards: {e}")
+        return jsonify({'error': 'Failed to add rewards'}), 500
+    
+    return jsonify({'error': 'User not found'}), 404
+
+@app.route('/api/mining/start', methods=['POST'])
+def start_mining():
+    """Start mining session and save to database"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    user = WebUser.query.get(session['user_id'])
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+    
+    try:
+        # Check if user can start mining (24h cooldown)
+        if user.last_daily_game and (datetime.utcnow() - user.last_daily_game).total_seconds() < 86400:
+            remaining = 86400 - (datetime.utcnow() - user.last_daily_game).total_seconds()
+            return jsonify({
+                'error': 'Mining cooldown active',
+                'remaining_seconds': int(remaining)
+            }), 400
+        
+        # Update mining start time
+        user.last_daily_game = datetime.utcnow()
+        db.session.commit()
+        
+        logger.info(f"User {user.telegram_id} started mining session")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Mining started successfully',
+            'mining_duration': 86400  # 24 hours in seconds
+        })
+        
+    except Exception as e:
+        logger.error(f"Error starting mining: {e}")
+        return jsonify({'error': 'Failed to start mining'}), 500
+
+@app.route('/api/mining/complete', methods=['POST'])
+def complete_mining():
+    """Complete mining session and award points"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    user = WebUser.query.get(session['user_id'])
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+    
+    try:
+        # Check if 24 hours have passed since mining started
+        if not user.last_daily_game:
+            return jsonify({'error': 'No active mining session'}), 400
+        
+        time_elapsed = (datetime.utcnow() - user.last_daily_game).total_seconds()
+        if time_elapsed < 86400:  # Less than 24 hours
+            remaining = 86400 - time_elapsed
+            return jsonify({
+                'error': 'Mining not complete yet',
+                'remaining_seconds': int(remaining)
+            }), 400
+        
+        # Award mining rewards
+        mining_reward = 5000  # 5000 broșcuțe per mining cycle
+        user.broscute_points += mining_reward
+        user.total_earned += mining_reward
+        
+        # Reset mining timer for next cycle
+        user.last_daily_game = datetime.utcnow()
+        
+        # Add game history
+        game_history = GameHistory(
+            user_id=user.id,
+            game_type='mining',
+            broscute_earned=mining_reward
+        )
+        db.session.add(game_history)
+        
+        db.session.commit()
+        
+        logger.info(f"User {user.telegram_id} completed mining and earned {mining_reward} broșcuțe")
+        
+        return jsonify({
+            'success': True,
+            'reward': mining_reward,
+            'new_balance': user.broscute_points,
+            'message': f'Mining completat! Ai câștigat {mining_reward} broșcuțe!'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error completing mining: {e}")
+        return jsonify({'error': 'Failed to complete mining'}), 500
