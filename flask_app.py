@@ -39,6 +39,7 @@ try:
     if bot:
         @bot.message_handler(commands=['start'])
         def start_command(message):
+            logging.info(f"Comanda /start primită de la chat ID: {message.chat.id}")
             keyboard = types.InlineKeyboardMarkup(row_width=2)
             keyboard.add(
                 types.InlineKeyboardButton("🇷🇴 Română", callback_data="lang_ro"),
@@ -50,9 +51,11 @@ try:
                 "Alege limba preferată:"
             )
             bot.send_message(message.chat.id, welcome_text, reply_markup=keyboard)
+            logging.info(f"Mesaj de bun venit trimis către chat ID: {message.chat.id}")
 
         @bot.message_handler(commands=['broscute'])
         def broscute_command(message):
+            logging.info(f"Comanda /broscute primită de la chat ID: {message.chat.id}")
             response = (
                 "🐸 *Broșcuțe MarioCoinAMG*\n\n"
                 "💰 Balanța ta: **350 broșcuțe**\n"
@@ -60,9 +63,11 @@ try:
                 "🎯 Bot funcționează 24/7 pe Render!"
             )
             bot.send_message(message.chat.id, response, parse_mode='Markdown')
+            logging.info(f"Răspuns 'broscute' trimis către chat ID: {message.chat.id}")
 
         @bot.callback_query_handler(func=lambda call: True)
         def callback_handler(call):
+            logging.info(f"Callback query primit: {call.data} de la chat ID: {call.message.chat.id}")
             if call.data == "lang_ro":
                 response = (
                     "🚀 *MarioCoinAMG - Ecosistem Verde*\n\n"
@@ -76,6 +81,7 @@ try:
                     call.message.message_id,
                     parse_mode='Markdown'
                 )
+                logging.info(f"Mesaj editat pentru limba română către chat ID: {call.message.chat.id}")
             elif call.data == "lang_en": # Adăugat și text în engleză pentru consistență
                 response = (
                     "🚀 *MarioCoinAMG - Green Ecosystem*\n\n"
@@ -89,6 +95,7 @@ try:
                     call.message.message_id,
                     parse_mode='Markdown'
                 )
+                logging.info(f"Mesaj editat pentru limba engleză către chat ID: {call.message.chat.id}")
 
 except ImportError:
     BOT_AVAILABLE = False
@@ -101,28 +108,37 @@ except ImportError:
 # Este esențial ca WEBHOOK_SECRET să fie setat în variabilele de mediu
 @app.route(f'/{WEBHOOK_SECRET}', methods=['POST'])
 def telegram_webhook():
+    logging.info("Webhook POST request primit.")
     if not BOT_AVAILABLE:
-        logging.warning("Webhook primit, dar bot-ul nu este disponibil.")
+        logging.warning("Webhook primit, dar bot-ul nu este disponibil (BOT_AVAILABLE este False).")
         return "Bot-ul nu este configurat.", 500
     
     # Verificare secret token pentru securitate
-    if request.headers.get('X-Telegram-Bot-Api-Secret-Token') != WEBHOOK_SECRET:
-        logging.warning("X-Telegram-Bot-Api-Secret-Token invalid primit.")
+    secret_header = request.headers.get('X-Telegram-Bot-Api-Secret-Token')
+    if secret_header != WEBHOOK_SECRET:
+        logging.warning(f"X-Telegram-Bot-Api-Secret-Token invalid primit. Așteptat: '{WEBHOOK_SECRET}', Primit: '{secret_header}'")
         return "Neautorizat", 403
 
     try:
         json_string = request.get_data().decode('utf-8')
+        logging.info(f"Webhook JSON primit: {json_string[:200]}...") # Logăm primii 200 de caractere
         update = telebot.types.Update.de_json(json_string)
+        logging.info(f"Actualizare Telegram procesată: Tip update={update.to_dict().get('update_id')}")
+        
+        # Procesăm actualizarea. Aici se apelează handler-ele.
         bot.process_new_updates([update])
+        logging.info("Actualizare procesată cu succes de bot.process_new_updates.")
         return "OK", 200
     except Exception as e:
-        logging.error(f"Eroare la procesarea actualizării webhook-ului: {e}")
+        logging.error(f"Eroare la procesarea actualizării webhook-ului: {e}", exc_info=True) # exc_info=True pentru traceback
         return f"Eroare: {e}", 500
 
 # Aceasta este ruta pe care o vizitezi tu pentru a activa bot-ul
 @app.route('/set_webhook')
 def set_webhook_route():
+    logging.info("Ruta /set_webhook accesată.")
     if not BOT_AVAILABLE:
+        logging.error("Bot-ul nu poate fi setat deoarece BOT_TOKEN lipsește.")
         return "❌ Bot-ul nu poate fi setat deoarece BOT_TOKEN lipsește."
 
     # Render oferă automat URL-ul public în variabila de mediu 'RENDER_EXTERNAL_URL'
@@ -148,7 +164,7 @@ def set_webhook_route():
             logging.error("Eroare la setarea webhook-ului.")
             return "❌ Eroare la setarea webhook-ului"
     except Exception as e:
-        logging.error(f"Eroare la setarea webhook-ului: {e}")
+        logging.error(f"Eroare la setarea webhook-ului: {e}", exc_info=True) # exc_info=True pentru traceback
         return f"❌ Eroare: {e}"
 
 # Pagina principală a aplicației web
@@ -160,6 +176,13 @@ def index():
     <p>Status: {status_text}</p>
     <p>După deploy, vizitează <a href="/set_webhook">/set_webhook</a> pentru a activa bot-ul.</p>
     """
+
+# === PORNIREA SERVERULUI FLASK CORESPUNZĂTOARE PENTRU RENDER ===
+if __name__ == '__main__':
+    logging.info("Rulez aplicația Flask local.")
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
+
 
 # === PORNIREA SERVERULUI FLASK CORESPUNZĂTOARE PENTRU RENDER ===
 if __name__ == '__main__':
